@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Google Splay Type-Ahead Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --g-blue: #1a73e8;
+  --g-blue-hover: #1557b0;
+  --g-blue-light: #e8f0fe;
+  --g-red: #ea4335;
+  --g-yellow: #fbbc04;
+  --g-green: #34a853;
+  --g-bg: #f8f9fa;
+  --g-card: #ffffff;
+  --g-text: #202124;
+  --g-subtext: #5f6368;
+  --g-border: #dadce0;
+  --g-shadow: 0 1px 6px rgba(32,33,36,0.12), 0 1px 2px rgba(32,33,36,0.08);
+  --g-shadow-hover: 0 4px 12px rgba(32,33,36,0.18);
+  --node-bg: #ffffff;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body {
+  margin: 0;
+  background-color: var(--g-bg);
+  color: var(--g-text);
+  font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- Header / Top Bar --- */
+.g-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--g-border);
+}
+
+.g-logo {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.g-logo span.g-blue { color: var(--g-blue); }
+.g-logo span.g-red { color: var(--g-red); }
+.g-logo span.g-yellow { color: var(--g-yellow); }
+.g-logo span.g-green { color: var(--g-green); }
+.g-logo .badge {
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--g-blue-light);
+  color: var(--g-blue);
+  padding: 3px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+  letter-spacing: 0;
+}
+
+.server {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--g-green);
+  font-size: 13px;
+  font-weight: 500;
+  background: #e6f4ea;
+  border: 1px solid #ceead6;
+  border-radius: 999px;
+  padding: 5px 14px;
+  transition: all 0.25s ease;
+}
+.server.off {
+  color: var(--g-red);
+  background: #fce8e6;
+  border-color: #fad2cf;
+}
+.server .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* --- Layout Grid --- */
+.app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 24px;
+  margin-top: 16px;
+}
+@media(max-width: 900px) {
+  .grid { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--g-card);
+  border: 1px solid var(--g-border);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--g-shadow);
+  transition: box-shadow 0.2s ease;
+}
+.card:hover {
+  box-shadow: var(--g-shadow-hover);
+}
+
+.card h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--g-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- Google Search Bar --- */
+.search-wrapper {
+  position: relative;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--g-border);
+  border-radius: 24px;
+  padding: 6px 16px;
+  box-shadow: 0 1px 6px rgba(32,33,36,0.15);
+  transition: all 0.2s ease;
+}
+.search-box:focus-within {
+  box-shadow: 0 2px 10px rgba(32,33,36,0.25);
+  border-color: transparent;
+}
+.search-icon {
+  width: 20px;
+  height: 20px;
+  fill: var(--g-subtext);
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+input {
+  width: 100%;
+  font-size: 18px;
+  font-family: inherit;
+  border: none;
+  background: transparent;
+  color: var(--g-text);
+  outline: none;
+  padding: 8px 0;
+}
+input.trigger {
+  animation: inputGlow 0.8s ease;
+}
+
+.suggestions {
+  list-style: none;
+  padding: 6px 0;
+  margin: 8px 0 0 0;
+  background: #ffffff;
+  border: 1px solid var(--g-border);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(32,33,36,0.15);
+}
+.suggestions li {
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  font-size: 15px;
+}
+.suggestions li:hover, .suggestions li.on {
+  background: var(--g-bg);
+}
+.suggestions li .sug-icon {
+  fill: var(--g-subtext);
+  width: 16px;
+  height: 16px;
+  margin-right: 12px;
+}
+.tag {
+  font-size: 12px;
+  color: var(--g-subtext);
+}
+
+/* --- Chips & Buttons --- */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+button {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--g-border);
+  background: #ffffff;
+  color: var(--g-blue);
+  border-radius: 20px;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+button:hover {
+  background: var(--g-blue-light);
+  border-color: #d2e3fc;
+  box-shadow: 0 1px 3px rgba(60,64,67,0.15);
+}
+button.primary {
+  background: var(--g-blue);
+  color: #ffffff;
+  border-color: var(--g-blue);
+}
+button.primary:hover {
+  background: var(--g-blue-hover);
+  box-shadow: 0 1px 4px rgba(26,115,232,0.4);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* --- Stats Grid --- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.stat {
+  padding: 14px;
+  border: 1px solid var(--g-border);
+  border-radius: 12px;
+  background: var(--g-bg);
+  text-align: center;
+  transition: all 0.2s ease;
+}
+.stat.hot {
+  border-color: var(--g-blue);
+  background: var(--g-blue-light);
+  transform: translateY(-2px);
+}
+.stats b {
+  font-size: 26px;
+  font-weight: 700;
+  display: block;
+  color: var(--g-blue);
+}
+.stat span {
+  font-size: 12px;
+  color: var(--g-subtext);
+}
+
+/* --- Search Result Panel --- */
+.result {
+  min-height: 60px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--g-border);
+}
+.result strong {
+  font-size: 18px;
+  color: var(--g-text);
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* --- Events --- */
+.event {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  border-left: 4px solid var(--g-blue);
+  background: #f1f3f4;
+  color: var(--g-text);
+}
+.event.new {
+  border-color: var(--g-green);
+  background: #e6f4ea;
+}
+.event.hit {
+  border-color: var(--g-blue);
+  background: #e8f0fe;
+}
+.event.reset {
+  border-color: var(--g-yellow);
+  background: #fef7e0;
+}
+
+/* --- Splay Tree Canvas --- */
+.treebox {
+  min-height: 520px;
+  background: #ffffff;
+  position: relative;
+  overflow: auto;
+  border-radius: 16px;
+}
+.tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.tree-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--g-text);
+}
+.tree-note {
+  color: var(--g-subtext);
+  font-size: 14px;
+  margin-top: 4px;
+}
+.tree-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 0 8px;
+  font-size: 13px;
+  color: var(--g-subtext);
+}
+.legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.legend.root i { background: var(--g-blue); }
+.legend.hit i { background: var(--g-green); }
+.legend.new i { background: var(--g-red); }
+
+svg {
+  width: 100%;
+  height: 440px;
+  display: block;
+  overflow: visible;
+}
+.edge {
+  stroke: var(--g-border);
+  stroke-width: 2;
+  transition: all 0.25s ease;
+}
+.edge.hot {
+  stroke: var(--g-blue);
+  stroke-width: 3;
+}
+.node {
+  cursor: pointer;
+}
+.node rect {
+  fill: #ffffff;
+  stroke: var(--g-border);
+  stroke-width: 1.5;
+  transition: all 0.2s ease;
+  filter: drop-shadow(0 1px 3px rgba(32,33,36,0.1));
+}
+.node:hover rect {
+  stroke: var(--g-blue);
+  filter: drop-shadow(0 2px 6px rgba(26,115,232,0.25));
+}
+.node.root rect {
+  fill: #e8f0fe;
+  stroke: var(--g-blue);
+  stroke-width: 2.5;
+}
+.node.focus rect {
+  stroke: var(--g-blue);
+  stroke-width: 3;
+}
+.node.new rect {
+  stroke: var(--g-green);
+  stroke-width: 2.5;
+  fill: #e6f4ea;
+}
+.node text {
+  fill: var(--g-text);
+  font-family: 'Google Sans', sans-serif;
+}
+.node .count {
+  fill: var(--g-subtext);
+  font-size: 10px;
+}
+
+@keyframes nodeHit {
+  0% { filter: drop-shadow(0 0 0 rgba(26,115,232,0)); }
+  40% { filter: drop-shadow(0 0 12px rgba(26,115,232,0.6)); }
+  100% { filter: none; }
+}
+@keyframes nodeNew {
+  0% { opacity: 0.2; }
+  50% { opacity: 1; filter: drop-shadow(0 0 14px rgba(52,168,83,0.6)); }
+  100% { opacity: 1; filter: none; }
+}
+@keyframes rootFlash {
+  0% { filter: drop-shadow(0 0 0 rgba(26,115,232,0)); }
+  45% { filter: drop-shadow(0 0 16px rgba(26,115,232,0.5)); }
+  100% { filter: none; }
+}
+@keyframes inputGlow {
+  0% { box-shadow: 0 0 0 rgba(26,115,232,0); }
+  50% { box-shadow: 0 0 12px rgba(26,115,232,0.3); }
+  100% { box-shadow: 0 1px 6px rgba(32,33,36,0.15); }
+}
+@keyframes panelPulse {
+  0% { box-shadow: 0 0 0 rgba(26,115,232,0); }
+  45% { box-shadow: 0 0 20px rgba(26,115,232,0.25); }
+  100% { box-shadow: var(--g-shadow); }
+}
+.metric-pop {
+  animation: metricPop 0.5s ease;
+}
+@keyframes metricPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); color: var(--g-blue); }
+  100% { transform: scale(1); }
+}
+.sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+</style>
+</head>
+<body>
+
+<header class="g-header">
+  <a href="#" class="g-logo">
+    <span class="g-blue">G</span><span class="g-red">o</span><span class="g-yellow">o</span><span class="g-blue">g</span><span class="g-green">l</span><span class="g-red">e</span>
+    <span style="color:#5f6368;font-weight:400;margin-left:4px">Typeahead</span>
+    <span class="badge">C Splay Engine</span>
+  </a>
+  <div class="server" id="serverStatus">
+    <span class="dot"></span>
+    <span id="serverText">Connected to C backend</span>
+  </div>
+</header>
+
+<div class="app">
+  <div class="grid">
+    <section>
+      <!-- Google Search Bar Card -->
+      <div class="card">
+        <label class="sr" for="search">Search query</label>
+        <div class="search-wrapper">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input id="search" placeholder='Search any phrase (e.g. “inte”)...' autocomplete="off" spellcheck="false">
+          </div>
+          <div id="suggestions"></div>
+        </div>
+        <p class="tag" style="margin-top:10px">Press Tab to complete · Arrow keys to select · Enter to splay search</p>
+      </div>
+
+      <!-- Cached Phrases / Trie Memory -->
+      <div class="card">
+        <h3>
+          <svg style="width:18px;height:18px;fill:var(--g-blue)" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z"/></svg>
+          Splay Memory Cache
+        </h3>
+        <div id="phrases" class="chips"></div>
+        <div class="toolbar">
+          <button id="reset">↺ Reset Memory</button>
+          <span class="tag">Click any cached phrase to splay it to root.</span>
+        </div>
+      </div>
+
+      <!-- Search Stats Card -->
+      <div class="card">
+        <div class="stats">
+          <div class="stat" id="statSearch">
+            <b id="searches">0</b>
+            <span>Searches</span>
+          </div>
+          <div class="stat" id="statHits">
+            <b id="hits">0</b>
+            <span>Cache Hits</span>
+          </div>
+          <div class="stat" id="statRate">
+            <b id="rate">–</b>
+            <span>Hit Rate</span>
+          </div>
+        </div>
+        <div id="result" class="result" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- Splay Tree Visualizer Section -->
+    <section>
+      <div class="card treebox" id="treeBox">
+        <div class="tree-header">
+          <div>
+            <div class="tree-title" id="treeTitle">Ready</div>
+            <div class="tree-note" id="treeNote">Search a phrase to see the C splay tree rotate and adapt.</div>
+          </div>
+        </div>
+
+        <div class="tree-legend">
+          <span class="legend root"><i></i>Root after Splay</span>
+          <span class="legend hit"><i></i>Cache Hit</span>
+          <span class="legend new"><i></i>New Phrase Inserted</span>
+        </div>
+
+        <svg id="tree" viewBox="0 0 900 440" role="img" aria-label="Interactive Splay Tree">
+          <defs>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="b"/>
+              <feMerge>
+                <feMergeNode in="b"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+        </svg>
+      </div>
+
+      <!-- Live Event Stream -->
+      <div class="card">
+        <h3>
+          <svg style="width:18px;height:18px;fill:var(--g-green)" viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+          Google Engine Event Stream
+        </h3>
+        <div id="events" class="tag" aria-live="polite">Waiting for search activity...</div>
+      </div>
+
+      <!-- How it works Card -->
+      <div class="card">
+        <h3>
+          <svg style="width:18px;height:18px;fill:var(--g-yellow)" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          Architecture Overview
+        </h3>
+        <p><b>Prefix Trie:</b> Predicts completions for what you type in real time.</p>
+        <p><b>C Splay Tree:</b> Every searched phrase is inserted or retrieved, then splayed to the root via tree rotations to make recent & frequent items faster to access.</p>
+        <p class="tag">Backend: C + Sockets · Frontend: Google Material 3 Design · API: REST</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const params=new URLSearchParams(location.search);
+const API=params.get('backend') || (location.protocol==='file:' ? 'http://127.0.0.1:8080' : '');
+let suggestions=[],selected=-1,lastQuery='',previousKeys=new Set(),eventSeq=0;
+const API_LABEL=API||'same origin';
+const $=id=>document.getElementById(id);
+
+async function api(path,opts={}){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),5000);
+  try{
+    const sep=path.includes('?')?'&':'?';
+    const r=await fetch(API+path+sep+'_='+Date.now(),{...opts,signal:controller.signal,cache:'no-store'});
+    const text=await r.text();
+    if(!r.ok) throw new Error(`HTTP ${r.status}: ${text||r.statusText}`);
+    const type=r.headers.get('content-type')||'';
+    if(!type.includes('application/json')) throw new Error(`Expected JSON from ${API_LABEL}, received ${type||'unknown content type'}`);
+    return JSON.parse(text);
+  }catch(e){
+    if(e.name==='AbortError') throw new Error(`Request timed out while contacting ${API_LABEL}`);
+    throw e;
+  }finally{clearTimeout(timer)}
+}
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function setStatus(ok,msg=''){
+  $('serverStatus').classList.toggle('off',!ok);
+  $('serverText').textContent=ok?'Connected to C backend':(msg||'Backend unavailable');
+}
+
+function pulse(id){
+  const el=$(id);
+  if(!el)return;
+  el.classList.remove('metric-pop','hot');
+  void el.offsetWidth;
+  el.classList.add('metric-pop','hot');
+  setTimeout(()=>el.classList.remove('metric-pop','hot'),650);
+}
+
+function flashInput(){
+  const el=$('search');
+  if(!el)return;
+  el.classList.remove('trigger');
+  void el.offsetWidth;
+  el.classList.add('trigger');
+  setTimeout(()=>el.classList.remove('trigger'),800);
+}
+
+function addEvent(title,text,type='hit'){
+  eventSeq++;
+  const div=document.createElement('div');
+  div.className='event '+type;
+  div.innerHTML='<b>'+esc(title)+'</b> · '+esc(text);
+  $('events').prepend(div);
+  while($('events').children.length>5)$('events').lastChild.remove();
+}
+
+async function loadSuggestions(){
+  const raw=$('search').value.trim();
+  const q=raw?raw.split(/\s+/).pop().toLowerCase():'';
+  if(!q){$('suggestions').innerHTML='';suggestions=[];selected=-1;return}
+  try{
+    const d=await api('/api/suggestions?q='+encodeURIComponent(q));
+    suggestions=d.suggestions||[];
+    selected=-1;
+    $('suggestions').innerHTML=suggestions.length?
+      '<ul class="suggestions">'+suggestions.map((x,i)=>'<li data-i="'+i+'"><svg class="sug-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg><span>'+esc(x)+'</span><span class="tag">trie prediction</span></li>').join('')+'</ul>':'';
+    document.querySelectorAll('.suggestions li').forEach(li=>li.onclick=()=>{
+      $('search').value=li.children[1].textContent+' ';
+      flashInput();
+      go();
+    });
+    if(suggestions.length) addEvent('Trie prediction','Found '+suggestions.length+' completion'+(suggestions.length===1?'':'s')+' for “'+q+'”.','hit');
+  }catch(e){setStatus(false, e.message)}
+}
+
+function choose(delta){
+  if(!suggestions.length)return;
+  selected=Math.max(0,Math.min(suggestions.length-1,selected+delta));
+  document.querySelectorAll('.suggestions li').forEach((x,i)=>x.classList.toggle('on',i===selected));
+}
+
+async function go(text){
+  const q=(text||$('search').value).trim().replace(/\s+/g,' ').toLowerCase();
+  if(!q)return;
+  try{
+    const r=await api('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+    setStatus(true);
+    lastQuery=q;
+    $('search').value='';
+    $('suggestions').innerHTML='';
+    $('treeTitle').textContent=r.hit?'⚡ Splay Cache Hit':'✦ New Phrase Inserted';
+    $('treeNote').textContent=r.hit?`Found at depth ${r.depth}; splayed to root in ${r.rotations} rotation${r.rotations===1?'':'s'}.`:`Inserted at depth ${r.depth}; splayed to root in ${r.rotations} rotation${r.rotations===1?'':'s'}.`;
+    const type=r.hit?'hit':'new';
+    $('result').innerHTML='<p><strong>'+esc(r.hit?'Cache Hit at depth '+r.depth:'Inserted at depth '+r.depth)+'</strong>“'+esc(q)+'” splayed to tree root.</p><div class="event '+type+'">'+(r.hit?'Repeated query moved to root for O(1) access.':'New phrase inserted into C splay tree & rotated to root.')+'</div>';
+    pulse('statSearch');
+    pulse(r.hit?'statHits':'statRate');
+    $('treeBox').classList.remove('pulse');
+    void $('treeBox').offsetWidth;
+    $('treeBox').classList.add('pulse');
+    addEvent(r.hit?'Cache Hit':'Node Splayed',r.hit?'“'+q+'” moved to root after '+r.rotations+' rotation'+(r.rotations===1?'':'s')+'.':'“'+q+'” joined tree & moved to root.',type);
+    try{await refresh(true)}catch(e){
+      setStatus(true);
+      addEvent('Search complete','Search succeeded, but refresh failed: '+e.message,'reset');
+    }
+  }catch(e){
+    setStatus(false, e.message);
+    addEvent('Connection error',e.message+' — make sure ./splay_server 8080 is running.','reset');
+  }
+}
+
+async function refresh(trigger=false){
+  try {
+    const st=await api('/api/stats');
+    const tr=await api('/api/tree');
+    setStatus(true);
+    $('searches').textContent=st.searches;
+    $('hits').textContent=st.cache_hits;
+    $('rate').textContent=st.searches?Math.round(st.hit_rate*100)+'%':'–';
+    if(trigger){pulse('statSearch');pulse('statHits');pulse('statRate')}
+    const nodes=tr.nodes||[];
+    const currentKeys=new Set(nodes.map(n=>n.key));
+    const added=trigger?[...currentKeys].filter(k=>!previousKeys.has(k)):[];
+    const phrases=[...nodes].sort((a,b)=>b.count-a.count||a.key.localeCompare(b.key));
+    const box=$('phrases');
+    box.innerHTML='';
+    if(!phrases.length) box.innerHTML='<span class="tag">No cached phrases yet.</span>';
+    else phrases.forEach(x=>{
+      const b=document.createElement('button');
+      b.textContent=`${x.key} ×${x.count}`;
+      b.onclick=()=>go(x.key);
+      if(added.includes(x.key)) b.classList.add('primary');
+      box.appendChild(b);
+    });
+    drawTree(nodes,added);
+    previousKeys=currentKeys;
+  } catch(e) {
+    setStatus(false, e.message);
+    throw e;
+  }
+}
+
+function drawTree(nodes,added=[]){
+  const svg=$('tree');
+  let defs=svg.querySelector('defs');
+  svg.replaceChildren();
+  const ns='http://www.w3.org/2000/svg';
+  const mkEl=(tag,attrs)=>{const e=document.createElementNS(ns,tag);if(attrs)Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));return e};
+  if(!defs){
+    defs=mkEl('defs');
+    defs.innerHTML='<filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+  }
+  svg.appendChild(defs);
+
+  if(!nodes.length){
+    const t=mkEl('text',{x:'450',y:'210','text-anchor':'middle',fill:'var(--g-subtext)'});
+    t.textContent='Tree is empty';
+    svg.appendChild(t);
+    return;
+  }
+
+  const byKey={};
+  nodes.forEach(n=>{byKey[n.key]=n;n._ch=[]});
+  const root=nodes.find(n=>n.depth===0)||nodes[0];
+  if(!root)return;
+  nodes.forEach(n=>{if(n.parent&&byKey[n.parent])byKey[n.parent]._ch.push(n)});
+  nodes.forEach(n=>{if(n._ch.length>1)n._ch.sort((a,b)=>a.key.localeCompare(b.key))});
+
+  const W=900,PAD=70,NW=130,RH=90;
+  function sw(n){return n._ch.length?n._ch.reduce((s,c)=>s+sw(c),0)+PAD*(n._ch.length-1):NW}
+  const pos={};
+  function lay(n,x0,row){const s=sw(n);pos[n.key]={x:x0+s/2,y:row*RH+RH/2};let cx=x0;n._ch.forEach(c=>{const cs=sw(c);lay(c,cx,row+1);cx+=cs+PAD})}
+  const treeW=sw(root);
+  const svgW=Math.max(W,treeW+2*PAD);
+  lay(root,(svgW-treeW)/2,0);
+
+  const maxD=Math.max(...nodes.map(n=>n.depth));
+  const svgH=Math.max(440,(maxD+1)*RH+40);
+  svg.setAttribute('viewBox',`0 0 ${svgW} ${svgH}`);
+  svg.setAttribute('height',svgH);
+
+  nodes.forEach(n=>{
+    if(!n.parent||!pos[n.parent]||!pos[n.key])return;
+    const p=pos[n.parent],q=pos[n.key];
+    svg.appendChild(mkEl('line',{x1:p.x,y1:p.y,x2:q.x,y2:q.y,class:'edge'+(n.key===lastQuery?' hot':'')}));
+  });
+
+  nodes.forEach(n=>{
+    const p=pos[n.key];if(!p)return;
+    const isNew=added.includes(n.key),isFocus=n.key===lastQuery;
+    const g=mkEl('g',{
+      class:'node'+(n.depth===0?' root':'')+(isFocus?' focus hit':'')+(isNew?' new':''),
+      transform:`translate(${p.x},${p.y})`,tabindex:'0',role:'button','aria-label':'Search '+n.key
+    });
+    const rect=mkEl('rect',{x:'-62',y:'-21',width:'124',height:'42',rx:'21'});
+    const label=mkEl('text',{y:'-2','font-size':'12','font-weight':'600','text-anchor':'middle'});
+    label.textContent=n.key.length>15?n.key.slice(0,14)+'\u2026':n.key;
+    const cnt=mkEl('text',{y:'13',class:'count','text-anchor':'middle'});
+    cnt.textContent='searched \xd7'+n.count;
+    const ttl=document.createElementNS(ns,'title');ttl.textContent=n.key;
+    g.append(rect,label,cnt,ttl);
+    g.onclick=()=>go(n.key);
+    g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go(n.key)}};
+    svg.appendChild(g);
+  });
+}
+
+$('search').addEventListener('input',loadSuggestions);
+$('search').addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){e.preventDefault();choose(1)}
+  else if(e.key==='ArrowUp'){e.preventDefault();choose(-1)}
+  else if(e.key==='Tab'&&suggestions.length){
+    e.preventDefault();
+    $('search').value=suggestions[Math.max(selected,0)]+' ';
+    flashInput();
+  }
+  else if(e.key==='Enter'){e.preventDefault();go()}
+});
+$('reset').onclick=async()=>{
+  try{
+    await api('/api/reset',{method:'POST'});
+    lastQuery='';
+    $('treeTitle').textContent='↺ Tree Reset';
+    $('treeNote').textContent='Starter phrases restored by C backend.';
+    $('result').innerHTML='';
+    addEvent('Tree reset','The backend restored starter phrases.','reset');
+    previousKeys=new Set();
+    await refresh(false);
+    flashInput();
+  }catch(e){setStatus(false,e.message)}
+};
+
+refresh().catch(e=>setStatus(false,e.message));
+</script>
+</body>
+</html>
